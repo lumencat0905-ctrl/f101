@@ -1,265 +1,238 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-<meta charset="UTF-8" />
-<meta name="viewport" content="width=device-width, initial-scale=1.0" />
-<title>F1 Mini Game (HTML + JS)</title>
-<style>
-  body {
-    margin: 0;
-    background: #0d1316;
-    color: #fff;
-    font-family: Arial, sans-serif;
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    gap: 12px;
-    padding: 20px;
-  }
-  #gameCanvas {
-    width: 900px;
-    height: 506px;
-    background: black;
-    border-radius: 10px;
-  }
-  .btn {
-    padding: 8px 16px;
-    background: #0066ff;
-    border: none;
-    color: white;
-    border-radius: 6px;
-    cursor: pointer;
-  }
-  .btn:hover {
-    background: #0050cc;
-  }
-  .row {
-    display: flex;
-    gap: 12px;
-  }
-</style>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>F1 Ultimate Edition</title>
+    <style>
+        body {
+            margin: 0;
+            background: #000;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            color: white;
+            font-family: Arial;
+        }
+        canvas {
+            background: #222;
+            border: 4px solid #fff;
+            margin-top: 20px;
+            border-radius: 10px;
+        }
+        #hud {
+            margin-top: 10px;
+            font-size: 20px;
+            text-align: center;
+        }
+        button {
+            margin: 5px;
+            padding: 10px 20px;
+            font-size: 16px;
+            border-radius: 8px;
+            border: none;
+            cursor: pointer;
+        }
+        #resetBtn { background: #ff4444; color: white; }
+        #pauseBtn { background: #44aaff; color: white; }
+    </style>
 </head>
 <body>
-<h2>F1 Mini Game — HTML + JavaScript</h2>
-<p>方向鍵駕駛，Space 暫停。純 HTML + JS 版本。</p>
-<canvas id="gameCanvas" width="900" height="506"></canvas>
-<div class="row">
-  <button class="btn" onclick="togglePause()">Pause / Resume</button>
-  <button class="btn" onclick="resetGame()" style="background:#cc0000">Reset</button>
-</div>
+    <h1>F1 Ultimate Edition 🏎️🔥</h1>
+    <div id="hud">速度：0 km/h ｜ 圈數：0</div>
+    <canvas id="game" width="900" height="500"></canvas>
+    <div>
+        <button id="resetBtn">Reset</button>
+        <button id="pauseBtn">Pause</button>
+    </div>
 
-<script>
-const canvas = document.getElementById("gameCanvas");
-const ctx = canvas.getContext("2d");
+    <script>
+        const canvas = document.getElementById("game");
+        const ctx = canvas.getContext("2d");
 
-// TRACK
-const track = {
-  cx: canvas.width / 2,
-  cy: canvas.height / 2,
-  innerRadius: 120,
-  outerRadius: 240,
-  startAngle: -Math.PI / 2,
-};
+        let car = {
+            x: 450,
+            y: 250,
+            angle: 0,
+            speed: 0,
+            maxSpeed: 7,
+            accel: 0.2,
+            turnRate: 0.05,
+        };
 
-// CAR
-const car = {
-  x: 0,
-  y: 0,
-  angle: 0,
-  speed: 0,
-  width: 18,
-  length: 28,
-};
+        let keys = {};
+        let paused = false;
+        let laps = 0;
+        let lapStart = performance.now();
+        let bestLap = null;
 
-let running = true;
-let laps = 0;
-let bestLap = null;
-let currentLapStart = performance.now();
-let infoText = "";
+        document.addEventListener("keydown", e => keys[e.key] = true);
+        document.addEventListener("keyup", e => keys[e.key] = false);
 
-const keys = { up: false, down: false, left: false, right: false };
+        function drawTrack() {
+            ctx.strokeStyle = "#aaa";
+            ctx.lineWidth = 8;
+            ctx.beginPath();
+            const p = [
+                [200, 80], [700, 80], [780, 150], [780, 240], [720, 300], [650, 340],
+                [600, 380], [500, 420], [400, 420], [300, 380], [240, 330], [180, 260],
+                [160, 180], [180, 120]
+            ];
+            ctx.moveTo(p[0][0], p[0][1]);
+            for (let i = 1; i < p.length; i++) ctx.lineTo(p[i][0], p[i][1]);
+            ctx.closePath();
+            ctx.stroke();
+        }
 
-// tuning
-const tuning = {
-  accel: 220,
-  brake: 380,
-  topSpeed: 520,
-  turnSpeed: 3.4,
-  friction: 0.98,
-  offTrackDrag: 0.92,
-};
+        function drawCar() {
+            ctx.save();
+            ctx.translate(car.x, car.y);
+            ctx.rotate(car.angle);
+            ctx.fillStyle = "#1E2BC3";
+            ctx.fillRect(-15, -8, 30, 16);
+            ctx.restore();
+        }
 
-// Init start pos
-(function initStart() {
-  const r = (track.innerRadius + track.outerRadius) / 2;
-  car.x = track.cx + Math.cos(track.startAngle) * (r + 10);
-  car.y = track.cy + Math.sin(track.startAngle) * (r + 10);
-  car.angle = track.startAngle + Math.PI / 2;
-})();
+        function function updateCar() {
+            if (keys["ArrowUp"]) car.speed = Math.min(car.speed + car.accel, car.maxSpeed);
+            if (keys["ArrowDown"]) car.speed = Math.max(car.speed - car.accel, -car.maxSpeed / 2);
+            if (keys["ArrowLeft"]) car.angle -= car.turnRate;
+            if (keys["ArrowRight"]) car.angle += car.turnRate;
 
-// Controls
-window.addEventListener("keydown", (e) => {
-  if (e.code === "ArrowUp") keys.up = true;
-  if (e.code === "ArrowDown") keys.down = true;
-  if (e.code === "ArrowLeft") keys.left = true;
-  if (e.code === "ArrowRight") keys.right = true;
-  if (e.code === "Space") running = !running;
-});
-window.addEventListener("keyup", (e) => {
-  if (e.code === "ArrowUp") keys.up = false;
-  if (e.code === "ArrowDown") keys.down = false;
-  if (e.code === "ArrowLeft") keys.left = false;
-  if (e.code === "ArrowRight") keys.right = false;
-});
+            let nextX = car.x + Math.cos(car.angle) * car.speed;
+            let nextY = car.y + Math.sin(car.angle) * car.speed;
 
-// UTIL
-function normalizeAngle(a) {
-  let x = a % (Math.PI * 2);
-  if (x < 0) x += Math.PI * 2;
-  return x;
-}
+            // --- 鈴鹿賽道邊界簡易碰撞偵測：超出路線就減速 ---
+            if (!ctx.isPointInStroke) {
+                car.x = nextX;
+                car.y = nextY;
+                return;
+            }
 
-function checkLap(prevAngle, curAngle) {
-  const a0 = normalizeAngle(prevAngle - track.startAngle);
-  const a1 = normalizeAngle(curAngle - track.startAngle);
-  if (a0 > Math.PI * 0.5 && a1 < Math.PI * 0.5) return 1;
-  return 0;
-}
+            ctx.lineWidth = 20;
+            drawTrack();
+            if (!ctx.isPointInStroke(nextX, nextY)) {
+                car.speed *= 0.7; // 撞牆減速
+            } else {
+                car.x = nextX;
+                car.y = nextY;
+            }
 
-function formatTime(s) {
-  const mm = String(Math.floor(s / 60)).padStart(2, "0");
-  const ss = String(Math.floor(s % 60)).padStart(2, "0");
-  const cs = String(Math.floor((s % 1) * 100)).padStart(2, "0");
-  return `${mm}:${ss}.${cs}`;
-}
+            // --- 終點線（判定圈數）---
+            if (car.y < 85 && car.x > 195 && car.x < 705) {
+                let now = performance.now();
+                let lapTime = (now - lapStart) / 1000;
+                if (lapTime > 3) {
+                    laps++;
+                    if (!bestLap || lapTime < bestLap) bestLap = lapTime;
+                    lapStart = now;
+                }
+            }
+        }() {
+            if (keys["ArrowUp"]) car.speed = Math.min(car.speed + car.accel, car.maxSpeed);
+            if (keys["ArrowDown"]) car.speed = Math.max(car.speed - car.accel, -car.maxSpeed / 2);
+            if (keys["ArrowLeft"]) car.angle -= car.turnRate;
+            if (keys["ArrowRight"]) car.angle += car.turnRate;
 
-// GAME LOOP
-let last = 0;
-function loop(t) {
-  if (!last) last = t;
-  const dt = Math.min((t - last) / 1000, 0.032);
-  last = t;
+            car.x += Math.cos(car.angle) * car.speed;
+            car.y += Math.sin(car.angle) * car.speed;
 
-  if (running) update(dt);
-  render();
+            if (car.x < 60 || car.x > 840 || car.y < 60 || car.y > 440) {
+                car.speed *= 0.9;
+            }
+        }
 
-  requestAnimationFrame(loop);
-}
-requestAnimationFrame(loop);
+        function function updateHUD() {
+            let now = performance.now();
+            let lapTime = ((now - lapStart) / 1000).toFixed(2);
+            let best = bestLap ? bestLap.toFixed(2) : "--";
+            document.getElementById("hud").textContent = `速度：${Math.round(car.speed * 30)} km/h ｜ 圈數：${laps} ｜ 本圈：${lapTime}s ｜ 最佳：${best}s`;
+        }() {
+            document.getElementById("hud").textContent = `速度：${Math.round(car.speed * 30)} km/h ｜ 圈數：${laps}`;
+        }
 
-function update(dt) {
-  // accel
-  if (keys.up) car.speed += tuning.accel * dt;
-  else if (keys.down) car.speed -= tuning.brake * dt;
-  else car.speed *= Math.pow(tuning.friction, dt * 60);
+        function loop() {
+            if (!paused) {
+                ctx.clearRect(0, 0, canvas.width, canvas.height);
+                drawTrack();
+                updateCar();
+                drawCar();
+                updateHUD();
+            }
+            requestAnimationFrame(loop);
+        }
 
-  car.speed = Math.max(Math.min(car.speed, tuning.topSpeed), -tuning.topSpeed * 0.5);
+        document.getElementById("resetBtn").onclick = () => {
+            car.x = 450;
+            car.y = 250;
+            car.angle = 0;
+            car.speed = 0;
+            laps = 0;
+        };
 
-  const steerFactor = Math.max(0.2, Math.min(1, car.speed / (tuning.topSpeed * 0.6)));
-  if (keys.left) car.angle -= tuning.turnSpeed * steerFactor * dt;
-  if (keys.right) car.angle += tuning.turnSpeed * steerFactor * dt;
+        document.getElementById("pauseBtn").onclick = () => paused = !paused;
 
-  const prevX = car.x;
-  const prevY = car.y;
-  const prevAngle = Math.atan2(prevY - track.cy, prevX - track.cx);
+        loop();
+    // --- AI CAR ---
+        let ai = {
+            x: 450,
+            y: 150,
+            angle: 0,
+            speed: 4,
+            waypoint: 0,
+            path: [
+                {x: 450, y: 80},
+                {x: 820, y: 80},
+                {x: 820, y: 420},
+                {x: 80, y: 420},
+                {x: 80, y: 80}
+            ]
+        };
 
-  car.x += Math.cos(car.angle) * car.speed * dt;
-  car.y += Math.sin(car.angle) * car.speed * dt;
+        function drawAI(){
+            ctx.save();
+            ctx.translate(ai.x, ai.y);
+            ctx.rotate(ai.angle);
+            ctx.fillStyle = "yellow";
+            ctx.fillRect(-15, -8, 30, 16);
+            ctx.restore();
+        }
 
-  const dx = car.x - track.cx;
-  const dy = car.y - track.cy;
-  const dist = Math.sqrt(dx * dx + dy * dy);
-  let off = false;
-  if (dist < track.innerRadius || dist > track.outerRadius) {
-    off = true;
-    car.speed *= tuning.offTrackDrag;
-  }
+        function updateAI(){
+            let wp = ai.path[ai.waypoint];
+            let dx = wp.x - ai.x;
+            let dy = wp.y - ai.y;
+            let targetAngle = Math.atan2(dy, dx);
+            
+            let diff = targetAngle - ai.angle;
+            if(diff > Math.PI) diff -= 2*Math.PI;
+            if(diff < -Math.PI) diff += 2*Math.PI;
 
-  const curAngle = Math.atan2(car.y - track.cy, car.x - track.cx);
-  const crossed = checkLap(prevAngle, curAngle);
-  if (crossed && !off) {
-    const now = performance.now();
-    const lapTime = (now - currentLapStart) / 1000;
-    laps++;
-    currentLapStart = now;
-    bestLap = bestLap === null || lapTime < bestLap ? lapTime : bestLap;
-    infoText = `Lap ${laps} — ${formatTime(lapTime)}`;
-  }
-}
+            ai.angle += diff * 0.03;
 
-function render() {
-  ctx.clearRect(0, 0, canvas.width, canvas.height);
+            ai.x += Math.cos(ai.angle) * ai.speed;
+            ai.y += Math.sin(ai.angle) * ai.speed;
 
-  // background
-  ctx.fillStyle = "#102027";
-  ctx.fillRect(0, 0, canvas.width, canvas.height);
+            if(Math.hypot(dx, dy) < 20){
+                ai.waypoint = (ai.waypoint + 1) % ai.path.length;
+            }
+        }
 
-  const { cx, cy, innerRadius, outerRadius, startAngle } = track;
+        // integrate AI into loop
+        const oldLoop = loop;
+        function loop(){
+            if (!paused) {
+                ctx.clearRect(0, 0, canvas.width, canvas.height);
+                drawTrack();
+                updateCar();
+                drawCar();
+                updateAI();
+                drawAI();
+                updateHUD();
+            }
+            requestAnimationFrame(loop);
+        }
 
-  // track outer
-  ctx.beginPath();
-  ctx.fillStyle = "#3a3a3a";
-  ctx.arc(cx, cy, outerRadius, 0, Math.PI * 2);
-  ctx.fill();
-
-  // inner cut
-  ctx.globalCompositeOperation = "destination-out";
-  ctx.beginPath();
-  ctx.arc(cx, cy, innerRadius, 0, Math.PI * 2);
-  ctx.fill();
-
-  ctx.globalCompositeOperation = "source-over";
-
-  // centre dash lines
-  ctx.save();
-  ctx.translate(cx, cy);
-  ctx.strokeStyle = "rgba(255,255,255,0.7)";
-  ctx.setLineDash([8, 10]);
-  const r = (innerRadius + outerRadius) / 2;
-  for (let i = 0; i < 36; i++) {
-    const a = (i / 36) * Math.PI * 2;
-    const sx = Math.cos(a) * (r - 12);
-    const sy = Math.sin(a) * (r - 12);
-    const ex = Math.cos(a) * (r + 12);
-    const ey = Math.sin(a) * (r + 12);
-    ctx.beginPath();
-    ctx.moveTo(sx, sy);
-    ctx.lineTo(ex, ey);
-    ctx.lineWidth = 4;
-    ctx.stroke();
-  }
-  ctx.restore();
-  ctx.setLineDash([]);
-
-  // start line
-  ctx.beginPath();
-  ctx.moveTo(cx + Math.cos(startAngle) * innerRadius, cy + Math.sin(startAngle) * innerRadius);
-  ctx.lineTo(cx + Math.cos(startAngle) * outerRadius, cy + Math.sin(startAngle) * outerRadius);
-  ctx.lineWidth = 3;
-  ctx.strokeStyle = "yellow";
-  ctx.stroke();
-
-  // car
-  ctx.save();
-  ctx.translate(car.x, car.y);
-  ctx.rotate(car.angle);
-  ctx.fillStyle = "#e53935";
-  roundRect(-car.length/2, -car.width/2, car.length, car.width, 4);
-  ctx.fill();
-
-  ctx.fillStyle = "#111";
-  ctx.fillRect(car.length/2 - 6, -car.width/2 - 4, 6, 4);
-  ctx.fillRect(-car.length/2 - 2, -car.width/2 - 4, 6, 4);
-  ctx.restore();
-
-  // HUD
-  ctx.fillStyle = "rgba(0,0,0,0.45)";
-  ctx.fillRect(12, 12, 170, 86);
-  ctx.fillStyle = "#fff";
-  ctx.font = "14px Arial";
-  ctx.fillText(`Speed: ${{} Math.round(car.speed)}} px/s`, 24, 36);
-  ctx.fillText(`Laps: ${laps}`, 24, 58);
-  ctx.fillText(`Best: ${bestLap ? formatTime(bestLap) : "--:--"}`, 24, 80);
-
-  if (infoText) {
-    ctx.fillStyle = "rgba(0,0,
+    </script>
+</body>
+</html>
