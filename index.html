@@ -1,0 +1,265 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>F1 Mini Game (HTML + JS)</title>
+<style>
+  body {
+    margin: 0;
+    background: #0d1316;
+    color: #fff;
+    font-family: Arial, sans-serif;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 12px;
+    padding: 20px;
+  }
+  #gameCanvas {
+    width: 900px;
+    height: 506px;
+    background: black;
+    border-radius: 10px;
+  }
+  .btn {
+    padding: 8px 16px;
+    background: #0066ff;
+    border: none;
+    color: white;
+    border-radius: 6px;
+    cursor: pointer;
+  }
+  .btn:hover {
+    background: #0050cc;
+  }
+  .row {
+    display: flex;
+    gap: 12px;
+  }
+</style>
+</head>
+<body>
+<h2>F1 Mini Game — HTML + JavaScript</h2>
+<p>方向鍵駕駛，Space 暫停。純 HTML + JS 版本。</p>
+<canvas id="gameCanvas" width="900" height="506"></canvas>
+<div class="row">
+  <button class="btn" onclick="togglePause()">Pause / Resume</button>
+  <button class="btn" onclick="resetGame()" style="background:#cc0000">Reset</button>
+</div>
+
+<script>
+const canvas = document.getElementById("gameCanvas");
+const ctx = canvas.getContext("2d");
+
+// TRACK
+const track = {
+  cx: canvas.width / 2,
+  cy: canvas.height / 2,
+  innerRadius: 120,
+  outerRadius: 240,
+  startAngle: -Math.PI / 2,
+};
+
+// CAR
+const car = {
+  x: 0,
+  y: 0,
+  angle: 0,
+  speed: 0,
+  width: 18,
+  length: 28,
+};
+
+let running = true;
+let laps = 0;
+let bestLap = null;
+let currentLapStart = performance.now();
+let infoText = "";
+
+const keys = { up: false, down: false, left: false, right: false };
+
+// tuning
+const tuning = {
+  accel: 220,
+  brake: 380,
+  topSpeed: 520,
+  turnSpeed: 3.4,
+  friction: 0.98,
+  offTrackDrag: 0.92,
+};
+
+// Init start pos
+(function initStart() {
+  const r = (track.innerRadius + track.outerRadius) / 2;
+  car.x = track.cx + Math.cos(track.startAngle) * (r + 10);
+  car.y = track.cy + Math.sin(track.startAngle) * (r + 10);
+  car.angle = track.startAngle + Math.PI / 2;
+})();
+
+// Controls
+window.addEventListener("keydown", (e) => {
+  if (e.code === "ArrowUp") keys.up = true;
+  if (e.code === "ArrowDown") keys.down = true;
+  if (e.code === "ArrowLeft") keys.left = true;
+  if (e.code === "ArrowRight") keys.right = true;
+  if (e.code === "Space") running = !running;
+});
+window.addEventListener("keyup", (e) => {
+  if (e.code === "ArrowUp") keys.up = false;
+  if (e.code === "ArrowDown") keys.down = false;
+  if (e.code === "ArrowLeft") keys.left = false;
+  if (e.code === "ArrowRight") keys.right = false;
+});
+
+// UTIL
+function normalizeAngle(a) {
+  let x = a % (Math.PI * 2);
+  if (x < 0) x += Math.PI * 2;
+  return x;
+}
+
+function checkLap(prevAngle, curAngle) {
+  const a0 = normalizeAngle(prevAngle - track.startAngle);
+  const a1 = normalizeAngle(curAngle - track.startAngle);
+  if (a0 > Math.PI * 0.5 && a1 < Math.PI * 0.5) return 1;
+  return 0;
+}
+
+function formatTime(s) {
+  const mm = String(Math.floor(s / 60)).padStart(2, "0");
+  const ss = String(Math.floor(s % 60)).padStart(2, "0");
+  const cs = String(Math.floor((s % 1) * 100)).padStart(2, "0");
+  return `${mm}:${ss}.${cs}`;
+}
+
+// GAME LOOP
+let last = 0;
+function loop(t) {
+  if (!last) last = t;
+  const dt = Math.min((t - last) / 1000, 0.032);
+  last = t;
+
+  if (running) update(dt);
+  render();
+
+  requestAnimationFrame(loop);
+}
+requestAnimationFrame(loop);
+
+function update(dt) {
+  // accel
+  if (keys.up) car.speed += tuning.accel * dt;
+  else if (keys.down) car.speed -= tuning.brake * dt;
+  else car.speed *= Math.pow(tuning.friction, dt * 60);
+
+  car.speed = Math.max(Math.min(car.speed, tuning.topSpeed), -tuning.topSpeed * 0.5);
+
+  const steerFactor = Math.max(0.2, Math.min(1, car.speed / (tuning.topSpeed * 0.6)));
+  if (keys.left) car.angle -= tuning.turnSpeed * steerFactor * dt;
+  if (keys.right) car.angle += tuning.turnSpeed * steerFactor * dt;
+
+  const prevX = car.x;
+  const prevY = car.y;
+  const prevAngle = Math.atan2(prevY - track.cy, prevX - track.cx);
+
+  car.x += Math.cos(car.angle) * car.speed * dt;
+  car.y += Math.sin(car.angle) * car.speed * dt;
+
+  const dx = car.x - track.cx;
+  const dy = car.y - track.cy;
+  const dist = Math.sqrt(dx * dx + dy * dy);
+  let off = false;
+  if (dist < track.innerRadius || dist > track.outerRadius) {
+    off = true;
+    car.speed *= tuning.offTrackDrag;
+  }
+
+  const curAngle = Math.atan2(car.y - track.cy, car.x - track.cx);
+  const crossed = checkLap(prevAngle, curAngle);
+  if (crossed && !off) {
+    const now = performance.now();
+    const lapTime = (now - currentLapStart) / 1000;
+    laps++;
+    currentLapStart = now;
+    bestLap = bestLap === null || lapTime < bestLap ? lapTime : bestLap;
+    infoText = `Lap ${laps} — ${formatTime(lapTime)}`;
+  }
+}
+
+function render() {
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+  // background
+  ctx.fillStyle = "#102027";
+  ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+  const { cx, cy, innerRadius, outerRadius, startAngle } = track;
+
+  // track outer
+  ctx.beginPath();
+  ctx.fillStyle = "#3a3a3a";
+  ctx.arc(cx, cy, outerRadius, 0, Math.PI * 2);
+  ctx.fill();
+
+  // inner cut
+  ctx.globalCompositeOperation = "destination-out";
+  ctx.beginPath();
+  ctx.arc(cx, cy, innerRadius, 0, Math.PI * 2);
+  ctx.fill();
+
+  ctx.globalCompositeOperation = "source-over";
+
+  // centre dash lines
+  ctx.save();
+  ctx.translate(cx, cy);
+  ctx.strokeStyle = "rgba(255,255,255,0.7)";
+  ctx.setLineDash([8, 10]);
+  const r = (innerRadius + outerRadius) / 2;
+  for (let i = 0; i < 36; i++) {
+    const a = (i / 36) * Math.PI * 2;
+    const sx = Math.cos(a) * (r - 12);
+    const sy = Math.sin(a) * (r - 12);
+    const ex = Math.cos(a) * (r + 12);
+    const ey = Math.sin(a) * (r + 12);
+    ctx.beginPath();
+    ctx.moveTo(sx, sy);
+    ctx.lineTo(ex, ey);
+    ctx.lineWidth = 4;
+    ctx.stroke();
+  }
+  ctx.restore();
+  ctx.setLineDash([]);
+
+  // start line
+  ctx.beginPath();
+  ctx.moveTo(cx + Math.cos(startAngle) * innerRadius, cy + Math.sin(startAngle) * innerRadius);
+  ctx.lineTo(cx + Math.cos(startAngle) * outerRadius, cy + Math.sin(startAngle) * outerRadius);
+  ctx.lineWidth = 3;
+  ctx.strokeStyle = "yellow";
+  ctx.stroke();
+
+  // car
+  ctx.save();
+  ctx.translate(car.x, car.y);
+  ctx.rotate(car.angle);
+  ctx.fillStyle = "#e53935";
+  roundRect(-car.length/2, -car.width/2, car.length, car.width, 4);
+  ctx.fill();
+
+  ctx.fillStyle = "#111";
+  ctx.fillRect(car.length/2 - 6, -car.width/2 - 4, 6, 4);
+  ctx.fillRect(-car.length/2 - 2, -car.width/2 - 4, 6, 4);
+  ctx.restore();
+
+  // HUD
+  ctx.fillStyle = "rgba(0,0,0,0.45)";
+  ctx.fillRect(12, 12, 170, 86);
+  ctx.fillStyle = "#fff";
+  ctx.font = "14px Arial";
+  ctx.fillText(`Speed: ${{} Math.round(car.speed)}} px/s`, 24, 36);
+  ctx.fillText(`Laps: ${laps}`, 24, 58);
+  ctx.fillText(`Best: ${bestLap ? formatTime(bestLap) : "--:--"}`, 24, 80);
+
+  if (infoText) {
+    ctx.fillStyle = "rgba(0,0,
